@@ -45,7 +45,9 @@ canvas{width:100%;height:230px;display:block}
   </div>
   <label for="kg">Peso (kg)</label>
   <input type="text" id="kg" inputmode="decimal" autocomplete="off" placeholder="Ej. 4,375">
-  <div class="hint">Para leer la báscula con la cámara: mantén pulsado este campo y elige “Escanear texto” (iPhone) o usa Google Lens (Android).</div>
+  <button class="btn alt" id="photo">📷 Foto a la báscula</button>
+  <input type="file" id="file2" accept="image/*" capture="environment" hidden>
+  <div class="hint">Lee la cifra de la foto. Siempre la puedes corregir antes de guardar. Alternativa: mantén pulsado el campo y elige “Escanear texto”.</div>
   <label for="dt">Fecha</label>
   <input type="date" id="dt">
   <button class="btn" id="save">Guardar</button>
@@ -169,6 +171,76 @@ $("file").onchange = async ev=>{
     if(confirm("Esto reemplaza los datos actuales por los de la copia. ¿Seguir?")){ data = arr; persist(); render(); $("msg").textContent = "Copia importada."; }
   }catch(e){ $("msg").textContent = "Ese archivo no es una copia válida."; }
 };
+
+// ---- OCR con Tesseract (se carga solo al usarlo) ----
+let tessP = null;
+function loadTess(){
+  if(window.Tesseract) return Promise.resolve();
+  if(!tessP) tessP = new Promise((res,rej)=>{
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+    s.onload = res; s.onerror = ()=>{ tessP = null; rej(new Error("carga")); };
+    document.head.appendChild(s);
+  });
+  return tessP;
+}
+function prep(file){
+  return new Promise((res,rej)=>{
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = ()=>{
+      const k = Math.min(1, 1400/Math.max(img.width,img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+      const g = c.getContext("2d"); g.drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(url);
+      const im = g.getImageData(0,0,c.width,c.height), d = im.data, n = c.width*c.height;
+      const gray = new Uint8Array(n), hist = new Array(256).fill(0);
+      for(let i=0;i<n;i++){ const v = (d[4*i]*0.3+d[4*i+1]*0.59+d[4*i+2]*0.11)|0; gray[i]=v; hist[v]++; }
+      let sum=0; for(let i=0;i<256;i++) sum+=i*hist[i];
+      let sB=0,wB=0,best=0,th=128;
+      for(let i=0;i<256;i++){ wB+=hist[i]; if(!wB) continue; const wF=n-wB; if(!wF) break; sB+=i*hist[i];
+        const mB=sB/wB, mF=(sum-sB)/wF, v=wB*wF*(mB-mF)*(mB-mF); if(v>best){best=v;th=i;} }
+      const mk = inv=>{
+        const o = document.createElement("canvas"); o.width=c.width; o.height=c.height;
+        const og = o.getContext("2d"), oi = og.createImageData(c.width,c.height);
+        for(let i=0;i<n;i++){ let b = gray[i]>th; if(inv) b=!b; const v=b?255:0; oi.data[4*i]=oi.data[4*i+1]=oi.data[4*i+2]=v; oi.data[4*i+3]=255; }
+        og.putImageData(oi,0,0); return o;
+      };
+      res([mk(false), mk(true)]);
+    };
+    img.onerror = ()=>rej(new Error("img"));
+    img.src = url;
+  });
+}
+function parseKg(text){
+  const found = (text.match(/\d[\d.,]*\d|\d/g)||[]).map(t=>{
+    t = t.replace(",",".");
+    if(t.split(".").length>2) return null;
+    let v = t.includes(".") ? parseFloat(t) : parseFloat(t);
+    if(!t.includes(".") && v>=1000) v = v/1000;
+    return v;
+  }).filter(v=>v!=null && v>=0.5 && v<=20);
+  return found.length ? found[0] : null;
+}
+$("photo").onclick = ()=>$("file2").click();
+$("file2").onchange = async ev=>{
+  const f = ev.target.files[0]; ev.target.value = ""; if(!f) return;
+  $("msg").textContent = "Cargando el lector (la primera vez tarda)…";
+  try{
+    await loadTess();
+    const [a,b] = await prep(f);
+    const w = await Tesseract.createWorker("eng",1,{logger:m=>{ if(m.status==="recognizing text") $("msg").textContent = "Leyendo la báscula… "+Math.round(m.progress*100)+"%"; }});
+    await w.setParameters({tessedit_char_whitelist:"0123456789.,", tessedit_pageseg_mode:"11"});
+    let kg = null;
+    for(const cv of [a,b]){ const r = await w.recognize(cv); kg = parseKg(r.data.text||""); if(kg) break; }
+    await w.terminate();
+    if(kg){ $("kg").value = fmtK(kg); $("msg").textContent = "He leído "+fmtK(kg)+" kg. Compruébalo y guarda."; }
+    else $("msg").textContent = "No he podido leer la cifra. Escríbela a mano o usa “Escanear texto”.";
+  }catch(e){
+    $("msg").textContent = "No he podido cargar el lector (¿sin conexión?). Escribe el peso a mano.";
+  }
+};
+
 window.addEventListener("resize", drawChart);
 $("dt").value = today();
 load(); render();
