@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3864">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Pesos de Hilda y Vigo</title>
+<style>
+:root{--bg:#faf8f5;--card:#fff;--tx:#222;--mu:#777;--bd:#e3ddd5;--h:#c55a11;--v:#2e75b6;--ac:#1f3864;--bt:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#17181a;--card:#222426;--tx:#eee;--mu:#9a9a9a;--bd:#38393b;--h:#f08a4b;--v:#6fb1e8;--ac:#8fb0e8;--bt:#111;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font:16px/1.4 Arial,Helvetica,sans-serif;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));max-width:520px;margin:0 auto}
+h1{font-size:20px;margin:4px 0 14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:8px}
+.cat{flex:1;padding:12px;border-radius:10px;border:2px solid var(--bd);background:var(--card);color:var(--tx);font:inherit;font-weight:bold}
+.cat.on[data-c="H"]{border-color:var(--h);color:var(--h)}
+.cat.on[data-c="V"]{border-color:var(--v);color:var(--v)}
+.btn{width:100%;padding:14px;margin-top:10px;border:0;border-radius:10px;background:var(--ac);color:var(--bt);font:inherit;font-weight:bold}
+.btn.alt{background:var(--card);color:var(--tx);border:1px solid var(--bd)}
+input[type=text],input[type=date]{width:100%;padding:12px;font:inherit;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx)}
+label{font-size:13px;color:var(--mu);display:block;margin:10px 0 4px}
+.hint{font-size:13px;color:var(--mu);margin-top:6px}
+#msg{font-size:14px;color:var(--mu);margin-top:8px;min-height:20px}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{padding:7px 4px;text-align:center;border-bottom:1px solid var(--bd)}
+th{font-size:13px;color:var(--mu)}
+td button{border:0;background:none;color:var(--mu);font-size:16px}
+.sum{display:flex;gap:8px;font-size:14px}.sum div{flex:1}
+canvas{width:100%;height:230px;display:block}
+.leg{display:flex;gap:16px;justify-content:center;font-size:13px;margin-top:6px}
+</style>
+</head>
+<body>
+<h1>🐈 Pesos de Hilda y Vigo</h1>
+
+<div class="card">
+  <div class="row">
+    <button class="cat on" data-c="H">Hilda</button>
+    <button class="cat" data-c="V">Vigo</button>
+  </div>
+  <label for="kg">Peso (kg)</label>
+  <input type="text" id="kg" inputmode="decimal" autocomplete="off" placeholder="Ej. 4,375">
+  <div class="hint">Para leer la báscula con la cámara: mantén pulsado este campo y elige “Escanear texto” (iPhone) o usa Google Lens (Android).</div>
+  <label for="dt">Fecha</label>
+  <input type="date" id="dt">
+  <button class="btn" id="save">Guardar</button>
+  <div id="msg"></div>
+</div>
+
+<div class="card"><div class="sum" id="sum"></div></div>
+
+<div class="card">
+  <canvas id="ch"></canvas>
+  <div class="leg"><span style="color:var(--h)">● Hilda</span><span style="color:var(--v)">● Vigo</span></div>
+</div>
+
+<div class="card">
+  <table><thead><tr><th>Fecha</th><th>Hilda</th><th>Vigo</th><th></th></tr></thead><tbody id="tb"></tbody></table>
+</div>
+
+<div class="card">
+  <div class="row">
+    <button class="btn alt" id="exp">Exportar copia</button>
+    <button class="btn alt" id="imp">Importar copia</button>
+  </div>
+  <input type="file" id="file" accept="application/json,.json" hidden>
+</div>
+
+<script>
+const KEY = "pesos-gatos-v1";
+const SEED = [
+  {d:"2026-07-03",c:"H",kg:3.630},{d:"2026-07-03",c:"V",kg:8.361},
+  {d:"2026-07-18",c:"H",kg:4.010},{d:"2026-08-04",c:"H",kg:4.145},
+  {d:"2026-08-08",c:"V",kg:8.145},{d:"2026-08-30",c:"H",kg:4.260},
+  {d:"2026-09-29",c:"H",kg:4.375},{d:"2026-09-29",c:"V",kg:8.300},
+  {d:"2026-10-30",c:"V",kg:8.450},{d:"2026-11-16",c:"H",kg:4.665}
+];
+let data = [], cat = "H";
+const $ = id => document.getElementById(id);
+const NAME = {H:"Hilda", V:"Vigo"};
+
+function load(){
+  try{ const s = localStorage.getItem(KEY); if(s){ data = JSON.parse(s); return; } }catch(e){}
+  data = SEED.slice();
+}
+function persist(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
+function today(){ const t = new Date(); t.setMinutes(t.getMinutes()-t.getTimezoneOffset()); return t.toISOString().slice(0,10); }
+function fmtD(d){ const [y,m,dd] = d.split("-"); return dd+"/"+m+"/"+y.slice(2); }
+function fmtK(k){ return k==null ? "" : k.toFixed(3).replace(".",","); }
+function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+function drawChart(){
+  const cv = $("ch"), r = window.devicePixelRatio||1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W*r; cv.height = H*r;
+  const g = cv.getContext("2d"); g.scale(r,r); g.clearRect(0,0,W,H);
+  if(!data.length) return;
+  const t = d => Date.parse(d+"T00:00:00Z")/864e5;
+  const t0 = Math.min(...data.map(x=>t(x.d))), t1 = Math.max(...data.map(x=>t(x.d)));
+  const ks = data.map(x=>x.kg);
+  const lo = Math.floor(Math.min(...ks)-0.3), hi = Math.ceil(Math.max(...ks)+0.3);
+  const L=38,R=10,T=10,B=24;
+  const X = d => L + (t1===t0 ? (W-L-R)/2 : (t(d)-t0)/(t1-t0)*(W-L-R));
+  const Y = k => T + (hi-k)/(hi-lo)*(H-T-B);
+  g.font = "11px Arial"; g.fillStyle = cssv("--mu"); g.strokeStyle = cssv("--bd"); g.lineWidth = 1;
+  const step = (hi-lo)>6 ? 2 : 1;
+  for(let k=lo;k<=hi;k+=step){ g.beginPath(); g.moveTo(L,Y(k)); g.lineTo(W-R,Y(k)); g.stroke(); g.textAlign="right"; g.fillText(k+"",L-6,Y(k)+4); }
+  const ds = [...new Set(data.map(x=>x.d))].sort();
+  g.textAlign = "center";
+  [ds[0], ds[ds.length-1]].forEach((d,i)=>{ if(i===1 && ds.length===1) return; g.fillText(fmtD(d),Math.min(Math.max(X(d),L+16),W-R-16),H-6); });
+  [["H","--h"],["V","--v"]].forEach(([c,v])=>{
+    const rs = data.filter(x=>x.c===c).sort((a,b)=>a.d<b.d?-1:1);
+    g.strokeStyle = g.fillStyle = cssv(v); g.lineWidth = 2;
+    g.beginPath(); rs.forEach((x,i)=>i?g.lineTo(X(x.d),Y(x.kg)):g.moveTo(X(x.d),Y(x.kg))); g.stroke();
+    rs.forEach(x=>{ g.beginPath(); g.arc(X(x.d),Y(x.kg),3.5,0,7); g.fill(); });
+  });
+}
+
+function render(){
+  data.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
+  const dates = [...new Set(data.map(x=>x.d))];
+  const val = (c,d)=>{ const r = data.find(x=>x.c===c&&x.d===d); return r?r.kg:null; };
+  $("sum").innerHTML = ["H","V"].map(c=>{
+    const rs = data.filter(x=>x.c===c);
+    if(!rs.length) return "<div><b>"+NAME[c]+"</b><br>—</div>";
+    const diff = rs[rs.length-1].kg - rs[0].kg;
+    return "<div><b>"+NAME[c]+"</b><br>"+fmtK(rs[rs.length-1].kg)+" kg<br><span style='color:var(--mu)'>"+(diff>=0?"+":"")+fmtK(diff)+" desde el inicio</span></div>";
+  }).join("");
+  $("tb").innerHTML = dates.slice().reverse().map(d=>
+    "<tr><td>"+fmtD(d)+"</td><td>"+fmtK(val("H",d))+"</td><td>"+fmtK(val("V",d))+"</td><td><button data-d=\""+d+"\" title=\"Borrar fila\">✕</button></td></tr>").join("");
+  drawChart();
+}
+
+document.querySelectorAll(".cat").forEach(b=>b.onclick=()=>{
+  cat = b.dataset.c;
+  document.querySelectorAll(".cat").forEach(x=>x.classList.toggle("on",x===b));
+});
+$("save").onclick = ()=>{
+  let kg = parseFloat(String($("kg").value).replace(",","."));
+  if(kg>100) kg = kg/1000; // si escriben gramos (4375)
+  const d = $("dt").value;
+  if(!(kg>0) || !d){ $("msg").textContent = "Revisa el peso y la fecha."; return; }
+  data = data.filter(x=>!(x.c===cat && x.d===d));
+  data.push({d, c:cat, kg:Math.round(kg*1000)/1000});
+  persist(); render();
+  $("kg").value = "";
+  $("msg").textContent = "Guardado: "+NAME[cat]+" "+fmtK(kg)+" kg.";
+};
+$("tb").onclick = e=>{
+  const d = e.target.dataset && e.target.dataset.d;
+  if(d && confirm("¿Borrar todas las pesadas del "+fmtD(d)+"?")){ data = data.filter(x=>x.d!==d); persist(); render(); }
+};
+$("exp").onclick = ()=>{
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data)],{type:"application/json"}));
+  a.download = "pesos-gatos-"+today()+".json"; a.click();
+};
+$("imp").onclick = ()=>$("file").click();
+$("file").onchange = async ev=>{
+  const f = ev.target.files[0]; ev.target.value = ""; if(!f) return;
+  try{
+    const arr = JSON.parse(await f.text());
+    if(!Array.isArray(arr) || !arr.every(x=>x.d&&(x.c==="H"||x.c==="V")&&x.kg>0)) throw 0;
+    if(confirm("Esto reemplaza los datos actuales por los de la copia. ¿Seguir?")){ data = arr; persist(); render(); $("msg").textContent = "Copia importada."; }
+  }catch(e){ $("msg").textContent = "Ese archivo no es una copia válida."; }
+};
+window.addEventListener("resize", drawChart);
+$("dt").value = today();
+load(); render();
+if("serviceWorker" in navigator){ navigator.serviceWorker.register("sw.js").catch(()=>{}); }
+</script>
+</body>
+</html>
